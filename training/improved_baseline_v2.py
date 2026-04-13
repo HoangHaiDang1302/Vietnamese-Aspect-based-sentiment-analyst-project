@@ -15,6 +15,12 @@
 #
 # ❌ Adversarial Training (FGM) — không áp dụng theo yêu cầu
 
+# %% Cell 0: [KAGGLE] Install Dependencies
+import subprocess, sys
+subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-q',
+                       'underthesea', 'pytorch-crf', 'gensim'])
+print("Dependencies installed!")
+
 # %% Cell 1: Setup & Imports
 import os, json, random, time, math, re
 import numpy as np
@@ -28,6 +34,10 @@ from torchcrf import CRF
 import warnings
 warnings.filterwarnings('ignore')
 
+# Auto-detect Kaggle environment
+IS_KAGGLE = os.path.exists('/kaggle/input')
+print(f"Running on: {'Kaggle' if IS_KAGGLE else 'Local'}")
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 torch.manual_seed(42); np.random.seed(42); random.seed(42)
 print(f"Device: {device}")
@@ -38,9 +48,25 @@ import seaborn as sns
 sns.set_theme(style='whitegrid')
 
 # %% Cell 2: Config & Constants
-DATA_DIR = '.'
-SAVE_DIR = './dl_improved_v2'
+# === PATHS: tự động chọn Kaggle hoặc Local ===
+if IS_KAGGLE:
+    # Trên Kaggle: data nằm trong dataset input
+    # Thay 'your-dataset-name' bằng tên dataset thật của bạn trên Kaggle
+    KAGGLE_DATASET = 'vietnamese-absa-uit-visd4sa'  # ← ĐỔI TÊN NÀY
+    DATA_DIR = f'/kaggle/input/{KAGGLE_DATASET}'
+    SAVE_DIR = '/kaggle/working/dl_improved_v2'
+else:
+    DATA_DIR = '.'
+    SAVE_DIR = './dl_improved_v2'
 os.makedirs(SAVE_DIR, exist_ok=True)
+print(f"Data dir: {DATA_DIR}")
+print(f"Save dir: {SAVE_DIR}")
+
+# Verify data files exist
+for fn in ['train.jsonl', 'dev.jsonl', 'test.jsonl']:
+    fp = os.path.join(DATA_DIR, fn)
+    assert os.path.exists(fp), f"File not found: {fp}. Check DATA_DIR or Kaggle dataset name!"
+print("All data files found!")
 
 ASPECTS = ["CAMERA","FEATURES","PERFORMANCE","DESIGN","PRICE",
            "GENERAL","SCREEN","BATTERY","STORAGE","SER&ACC"]
@@ -197,45 +223,55 @@ VOCAB_SIZE = len(word2idx)
 print(f"Vocab size: {VOCAB_SIZE}")
 
 # Thử load FastText pre-trained, fallback sang Word2Vec nếu không có
-FASTTEXT_PATH = './cc.vi.300.vec'  # Download từ https://fasttext.cc/docs/en/crawl-vectors.html
+# Trên Kaggle: tự download nếu chưa có
+if IS_KAGGLE:
+    FASTTEXT_PATH = '/kaggle/working/cc.vi.300.vec'
+    if not os.path.exists(FASTTEXT_PATH):
+        print("Downloading FastText Vietnamese (cc.vi.300.vec) on Kaggle...")
+        print("This may take 5-10 minutes...")
+        os.system('wget -q https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.vi.300.vec.gz -O /kaggle/working/cc.vi.300.vec.gz')
+        os.system('gunzip /kaggle/working/cc.vi.300.vec.gz')
+        print("Download complete!")
+else:
+    FASTTEXT_PATH = './cc.vi.300.vec'
 
-if os.path.exists(FASTTEXT_PATH):
-    print(f"📦 Loading FastText pre-trained ({EMB_DIM}d)...")
-    ft_model = KeyedVectors.load_word2vec_format(FASTTEXT_PATH, limit=200000)
-    emb_matrix = np.random.normal(0, 0.1, (VOCAB_SIZE, EMB_DIM)).astype(np.float32)
+def load_embeddings(fasttext_path, word2idx, emb_dim, vocab_size):
+    """Load FastText hoặc fallback sang Word2Vec"""
+    emb_matrix = np.random.normal(0, 0.1, (vocab_size, emb_dim)).astype(np.float32)
     emb_matrix[PAD_IDX] = 0
-    hit, miss = 0, 0
-    for w, idx in word2idx.items():
-        if w in ft_model:
-            emb_matrix[idx] = ft_model[w]
-            hit += 1
-        elif '_' in w:
-            # Compound word: average sub-words
-            parts = w.split('_')
-            vecs = [ft_model[p] for p in parts if p in ft_model]
-            if vecs:
-                emb_matrix[idx] = np.mean(vecs, axis=0)
+
+    if os.path.exists(fasttext_path):
+        print(f"Loading FastText pre-trained ({emb_dim}d)...")
+        ft_model = KeyedVectors.load_word2vec_format(fasttext_path, limit=200000)
+        hit, miss = 0, 0
+        for w, idx in word2idx.items():
+            if w in ft_model:
+                emb_matrix[idx] = ft_model[w]
                 hit += 1
+            elif '_' in w:
+                parts = w.split('_')
+                vecs = [ft_model[p] for p in parts if p in ft_model]
+                if vecs:
+                    emb_matrix[idx] = np.mean(vecs, axis=0)
+                    hit += 1
+                else:
+                    miss += 1
             else:
                 miss += 1
-        else:
-            miss += 1
-    print(f"✅ FastText loaded! Hit: {hit}/{VOCAB_SIZE} ({hit/VOCAB_SIZE*100:.1f}%), Miss: {miss}")
-    del ft_model  # Free memory
-else:
-    print(f"⚠️ FastText file not found at {FASTTEXT_PATH}")
-    print(f"   Falling back to Word2Vec self-trained ({EMB_DIM}d)...")
-    print(f"   💡 Để kết quả tốt nhất, hãy download FastText Vietnamese:")
-    print(f"      wget https://dl.fbaipublicfiles.com/fasttext/vectors-crawl/cc.vi.300.vec.gz")
-    print(f"      gunzip cc.vi.300.vec.gz")
-    from gensim.models import Word2Vec
-    w2v = Word2Vec(all_sentences, vector_size=EMB_DIM, window=5, min_count=2,
-                   workers=4, epochs=20, sg=1, seed=42)
-    emb_matrix = np.random.normal(0, 0.1, (VOCAB_SIZE, EMB_DIM)).astype(np.float32)
-    emb_matrix[PAD_IDX] = 0
-    for w, idx in word2idx.items():
-        if w in w2v.wv: emb_matrix[idx] = w2v.wv[w]
-    print(f"✅ Word2Vec trained as fallback")
+        print(f"FastText loaded! Hit: {hit}/{vocab_size} ({hit/vocab_size*100:.1f}%), Miss: {miss}")
+        del ft_model
+        import gc; gc.collect()
+    else:
+        print(f"FastText not found at {fasttext_path}, using Word2Vec fallback ({emb_dim}d)...")
+        from gensim.models import Word2Vec
+        w2v = Word2Vec(all_sentences, vector_size=emb_dim, window=5, min_count=2,
+                       workers=4, epochs=20, sg=1, seed=42)
+        for w, idx in word2idx.items():
+            if w in w2v.wv: emb_matrix[idx] = w2v.wv[w]
+        print(f"Word2Vec trained as fallback")
+    return emb_matrix
+
+emb_matrix = load_embeddings(FASTTEXT_PATH, word2idx, EMB_DIM, VOCAB_SIZE)
 
 def tokenize(text, max_len):
     words = text.split()[:max_len]
@@ -307,7 +343,7 @@ def create_oversampled_data(texts, tags, sent_labels, lens, oversample_factor=3)
     return aug_texts, aug_tags, aug_sent, aug_lens
 
 train_texts_aug, train_tags_aug, train_sent_aug, train_lens_aug = \
-    create_oversampled_data(train_texts, train_tags, train_sent, train_lens, oversample_factor=3)
+    create_oversampled_data(train_texts, train_tags, train_sent, train_lens, oversample_factor=2)
 
 # %% Cell 8: Dataset & DataLoader
 class BIODataset(Dataset):
@@ -338,9 +374,11 @@ dev_loader = DataLoader(dev_ds, BATCH_SIZE)
 test_loader = DataLoader(test_ds, BATCH_SIZE)
 print(f"✅ DataLoaders ready: Train={len(train_ds)} Dev={len(dev_ds)} Test={len(test_ds)}")
 
-# %% Cell 9: [CẢI TIẾN 3] Class-weighted CRF Loss
-def compute_tag_weights(tags_list, lens_list, num_tags, smoothing=0.1):
-    """Compute inverse frequency weights for BIO tags"""
+# %% Cell 9: [CẢI TIẾN 3] Tag Distribution Analysis
+# NOTE: Emission scaling đã bị BỎ vì gây train/test mismatch với CRF.
+# Thay vào đó dùng Oversampling (Cell 7) để xử lý class imbalance.
+def analyze_tag_distribution(tags_list, lens_list, num_tags):
+    """Phân tích phân bố tag — chỉ để quan sát, KHÔNG dùng weight emissions"""
     tag_counter = Counter()
     total = 0
     for tags, l in zip(tags_list, lens_list):
@@ -348,29 +386,16 @@ def compute_tag_weights(tags_list, lens_list, num_tags, smoothing=0.1):
             tag_counter[t] += 1
             total += 1
 
-    weights = torch.ones(num_tags)
-    for tag_id in range(num_tags):
-        freq = tag_counter.get(tag_id, 1)
-        # Inverse sqrt frequency weighting (smoother than pure inverse)
-        weights[tag_id] = math.sqrt(total / (num_tags * freq))
+    print("\n📊 Tag distribution (top B-tags):")
+    b_counts = [(tid, c) for tid, c in tag_counter.items() if BIO_TAGS[tid].startswith('B-')]
+    for tid, count in sorted(b_counts, key=lambda x: x[1], reverse=True)[:10]:
+        pct = count / total * 100
+        print(f"  {BIO_TAGS[tid]:30s}: {count:5d} ({pct:.2f}%)")
+    o_count = tag_counter.get(O_TAG, 0)
+    print(f"  {'O (non-entity)':30s}: {o_count:5d} ({o_count/total*100:.1f}%)")
+    print(f"  → Class imbalance handled by Oversampling (Cell 7)")
 
-    # Giảm weight của O tag (đã quá nhiều)
-    weights[O_TAG] = max(0.3, weights[O_TAG] * 0.5)
-
-    # Normalize: mean weight = 1
-    weights = weights / weights.mean()
-
-    print("\n📊 Tag weights (top/bottom):")
-    sorted_weights = sorted(enumerate(weights.tolist()), key=lambda x: x[1], reverse=True)
-    for idx, w in sorted_weights[:5]:
-        print(f"  ⬆️ {BIO_TAGS[idx]}: {w:.3f}")
-    print("  ...")
-    for idx, w in sorted_weights[-3:]:
-        print(f"  ⬇️ {BIO_TAGS[idx]}: {w:.3f}")
-
-    return weights.to(device)
-
-tag_weights = compute_tag_weights(train_tags, train_lens, NUM_TAGS)
+analyze_tag_distribution(train_tags, train_lens, NUM_TAGS)
 
 # %% Cell 10: [CẢI TIẾN 5] Self-Attention Layer
 class SelfAttention(nn.Module):
@@ -406,10 +431,10 @@ class SelfAttention(nn.Module):
 
 # %% Cell 11: Improved Model Architectures
 class ImprovedSequenceCRF(nn.Module):
-    """BiGRU/BiLSTM + Self-Attention + CRF with class-weighted loss"""
+    """BiGRU/BiLSTM + Self-Attention + CRF (NO emission scaling)"""
     def __init__(self, vocab_size, emb_dim, hidden_dim, num_tags, pretrained_emb=None,
                  n_layers=2, dropout=0.3, pad_idx=0, rnn_type='gru', bidir=True,
-                 use_attention=True, tag_weights=None):
+                 use_attention=True):
         super().__init__()
         self.bidir = bidir
         self.use_attention = use_attention
@@ -439,9 +464,6 @@ class ImprovedSequenceCRF(nn.Module):
             nn.Dropout(dropout), nn.Linear(rnn_out // 2, num_tags))
         self.crf = CRF(num_tags, batch_first=True)
 
-        # [CẢI TIẾN 3] Tag weights for weighted emission scores
-        self.tag_weights = tag_weights
-
     def _get_emissions(self, seqs, lens, mask=None):
         emb = self.drop(self.emb(seqs))
         packed = nn.utils.rnn.pack_padded_sequence(
@@ -453,13 +475,7 @@ class ImprovedSequenceCRF(nn.Module):
         if self.use_attention:
             output = self.attention(output, mask)
 
-        emissions = self.hidden2tag(self.drop(output))
-
-        # Apply tag weights to emissions (bias toward minority tags)
-        if self.tag_weights is not None and self.training:
-            emissions = emissions * self.tag_weights.unsqueeze(0).unsqueeze(0)
-
-        return emissions
+        return self.hidden2tag(self.drop(output))
 
     def forward(self, seqs, lens, mask, tags=None):
         emissions = self._get_emissions(seqs, lens, mask)
@@ -472,9 +488,9 @@ class ImprovedSequenceCRF(nn.Module):
 
 
 class ImprovedCNNCRF(nn.Module):
-    """TextCNN + Self-Attention + CRF"""
+    """TextCNN + Self-Attention + CRF (NO emission scaling)"""
     def __init__(self, vocab_size, emb_dim, hidden_dim, num_tags, pretrained_emb=None,
-                 pad_idx=0, dropout=0.3, use_attention=True, tag_weights=None):
+                 pad_idx=0, dropout=0.3, use_attention=True):
         super().__init__()
         self.use_attention = use_attention
         if pretrained_emb is not None:
@@ -495,7 +511,6 @@ class ImprovedCNNCRF(nn.Module):
             nn.Linear(conv_out, conv_out // 2), nn.ReLU(),
             nn.Dropout(dropout), nn.Linear(conv_out // 2, num_tags))
         self.crf = CRF(num_tags, batch_first=True)
-        self.tag_weights = tag_weights
 
     def _get_emissions(self, seqs, mask=None):
         emb = self.drop(self.emb(seqs)).transpose(1, 2)
@@ -503,10 +518,7 @@ class ImprovedCNNCRF(nn.Module):
         out = torch.cat(conv_outs, dim=1).transpose(1, 2)
         if self.use_attention:
             out = self.attention(out, mask)
-        emissions = self.hidden2tag(self.drop(out))
-        if self.tag_weights is not None and self.training:
-            emissions = emissions * self.tag_weights.unsqueeze(0).unsqueeze(0)
-        return emissions
+        return self.hidden2tag(self.drop(out))
 
     def forward(self, seqs, lens, mask, tags=None):
         emissions = self._get_emissions(seqs, mask)
@@ -675,14 +687,14 @@ common = dict(
     vocab_size=VOCAB_SIZE, emb_dim=EMB_DIM, hidden_dim=HIDDEN_DIM,
     num_tags=NUM_TAGS, pretrained_emb=emb_matrix,
     n_layers=NUM_LAYERS, dropout=DROPOUT, pad_idx=PAD_IDX,
-    use_attention=True, tag_weights=tag_weights  # ← CẢI TIẾN 3 + 5
+    use_attention=True  # ← Self-Attention (CẢI TIẾN 5)
 )
 
 model_configs = {
     'TextCNN-CRF-v2': lambda: ImprovedCNNCRF(
         vocab_size=VOCAB_SIZE, emb_dim=EMB_DIM, hidden_dim=HIDDEN_DIM,
         num_tags=NUM_TAGS, pretrained_emb=emb_matrix, pad_idx=PAD_IDX,
-        dropout=DROPOUT, use_attention=True, tag_weights=tag_weights),
+        dropout=DROPOUT, use_attention=True),
     'RNN-CRF-v2': lambda: ImprovedSequenceCRF(**common, rnn_type='rnn', bidir=False),
     'LSTM-CRF-v2': lambda: ImprovedSequenceCRF(**common, rnn_type='lstm', bidir=False),
     'BiLSTM-CRF-v2': lambda: ImprovedSequenceCRF(**common, rnn_type='lstm', bidir=True),

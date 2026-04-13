@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+
+# Notebooks (not needed in container)
+notebooks/
+*.ipynb
+
+# IDE
+.vscode
+.idea
+
+# Cache
+.cache
+*.egg-info
+
+# Large model files that should be volume-mounted
+# models/phobert_crf.pt
+
+# Temp
+temp_*
+*.tmp

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Phân tích cảm xúc theo khía cạnh cho đánh giá sản phẩm tiếng Việt - Vietnamese Aspect-Based Sentiment Analysis">
+    <title>Vietnamese ABSA — Phân tích cảm xúc sản phẩm</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Background animated blobs -->
+    <div class="bg-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="hero" id="hero-header">
+            <div class="hero-badge">🇻🇳 AI-Powered</div>
+            <h1>Vietnamese ABSA</h1>
+            <p class="hero-subtitle">Phân tích cảm xúc theo khía cạnh cho đánh giá sản phẩm tiếng Việt</p>
+            <div class="hero-tags">
+                <span class="hero-tag">Deep Learning</span>
+                <span class="hero-tag">BiGRU-CRF</span>
+                <span class="hero-tag">NLP</span>
+                <span class="hero-tag">BIO Tagging</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Input Section -->
+            <section class="input-section glass-card" id="input-section">
+                <div class="section-header">
+                    <h2>📝 Nhập đánh giá</h2>
+                    <div class="model-selector">
+                        <label for="model-select">Model:</label>
+                        <select id="model-select">
+                            <option value="bigru_crf" selected>BiGRU-CRF (Nhanh)</option>
+                            <option value="phobert_crf" disabled>PhoBERT-CRF (Chính xác)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="textarea-wrapper">
+                    <textarea 
+                        id="review-input" 
+                        placeholder="Nhập đánh giá sản phẩm tiếng Việt tại đây... &#10;Ví dụ: Máy đẹp, pin trâu, camera chụp rõ nét nhưng loa hơi nhỏ"
+                        rows="4"
+                        maxlength="2000"
+                    ></textarea>
+                    <span class="char-count" id="char-count">0 / 2000</span>
+                </div>
+
+                <!-- Example buttons -->
+                <div class="examples-row">
+                    <span class="examples-label">💡 Thử nhanh:</span>
+                    <div class="example-chips" id="example-chips">
+                        <button class="chip" data-text="Sp ổn, mỗi tội vân tay lúc nhận lúc không, nhân viên nhiệt tình, pin trâu, cả đêm tụt 1%">📌 Review 1</button>
+                        <button class="chip" data-text="Máy xài tốt, mượt, sạc rất nhanh, pin trâu, mình dùng tác vụ bình thường thì được 1 ngày rưỡi. camera thì đẹp ảo">📌 Review 2</button>
+                        <button class="chip" data-text="Mua cho mẹ sài nên củng không đòi hỏi gì nhiều, máy đẹp camera siêu ảo, thử chiến game củng ok, pin sài dc 2 ngày">📌 Review 3</button>
+                    </div>
+                </div>
+
+                <button class="btn-analyze" id="btn-analyze" type="button">
+                    <span class="btn-icon">🔍</span>
+                    <span class="btn-text">Phân tích</span>
+                    <div class="btn-loader" id="btn-loader"></div>
+                </button>
+            </section>
+
+            <!-- Results Section (hidden initially) -->
+            <section class="results-section" id="results-section" style="display: none;">
+                <!-- Metrics Cards -->
+                <div class="metrics-grid" id="metrics-grid">
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">🏷️</div>
+                        <div class="metric-value" id="metric-aspects">0</div>
+                        <div class="metric-label">Khía cạnh</div>
+                    </div>
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon">📊</div>
+                        <div class="metric-value" id="metric-spans">0</div>
+                        <div class="metric-label">Đoạn phát hiện</div>
+                    </div>
+                    <div class="metric-card glass-card">
+                        <div class="metric-icon" id="metric-overall-icon">😊</div>
+                        <div class="metric-value" id="metric-overall">—</div>
+                        <div class="metric-label">Tổng quan</div>
+                    </div>
+                </div>
+
+                <!-- Two-column: Highlighted text + Span cards -->
+                <div class="results-grid">
+                    <!-- Left: Highlighted text -->
+                    <div class="highlight-panel glass-card" id="highlight-panel">
+                        <h3>🎨 Văn bản Highlight</h3>
+                        <div class="legend">
+                            <span class="legend-item legend-positive"><span class="legend-dot"></span>Tích cực</span>
+                            <span class="legend-item legend-neutral"><span class="legend-dot"></span>Trung lập</span>
+                            <span class="legend-item legend-negative"><span class="legend-dot"></span>Tiêu cực</span>
+                        </div>
+                        <div class="highlight-text" id="highlight-text"></div>
+                    </div>
+
+                    <!-- Right: Span detail cards -->
+                    <div class="spans-panel" id="spans-panel">
+                        <h3>🏷️ Chi tiết bóc tách</h3>
+                        <div class="spans-list" id="spans-list"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Empty state -->
+            <section class="empty-state" id="empty-state">
+                <div class="empty-illustration">
+                    <div class="empty-circle"></div>
+                    <div class="empty-icon">📱</div>
+                </div>
+                <p>Nhập đánh giá sản phẩm và nhấn <strong>Phân tích</strong> để bắt đầu</p>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Vietnamese ABSA Project — VLSP 2018 Dataset — Built with FastAPI & PyTorch</p>
+        </footer>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
