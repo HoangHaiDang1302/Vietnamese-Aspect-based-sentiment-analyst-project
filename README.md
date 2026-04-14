@@ -23,7 +23,8 @@ Phân tích cảm xúc theo khía cạnh cho đánh giá sản phẩm tiếng Vi
 │
 ├── models/                   # Pre-trained weights
 │   ├── bigru_crf.pt         # BiGRU-CRF (~12MB)
-│   └── phobert_crf.pt       # PhoBERT-CRF (~540MB)
+│   ├── phobert_crf.pt       # PhoBERT-CRF (~540MB)
+│   └── word2vec.model       # Word2Vec Embeddings
 │
 ├── data/                     # VLSP 2018 Dataset
 │   ├── train.jsonl
@@ -32,6 +33,7 @@ Phân tích cảm xúc theo khía cạnh cho đánh giá sản phẩm tiếng Vi
 │
 ├── notebooks/                # Research notebooks
 ├── training/                 # Training scripts
+├── docs/                     # Documentation
 │
 ├── Dockerfile
 ├── docker-compose.yml
@@ -63,12 +65,12 @@ docker-compose up --build
 
 ## 📡 API Endpoints
 
-| Method | Endpoint | Mô tả |
-|--------|----------|--------|
-| `GET` | `/api/health` | Health check |
-| `GET` | `/api/models` | Danh sách models |
+| Method | Endpoint       | Mô tả               |
+| ------ | -------------- | ------------------- |
+| `GET`  | `/api/health`  | Health check        |
+| `GET`  | `/api/models`  | Danh sách models    |
 | `POST` | `/api/predict` | Phân tích sentiment |
-| `GET` | `/docs` | Swagger UI |
+| `GET`  | `/docs`        | Swagger UI          |
 
 ### Ví dụ gọi API
 
@@ -80,17 +82,17 @@ curl -X POST http://localhost:8000/api/predict \
 
 ## 🏗️ Models
 
-| Model | Size | Micro F1 | Macro F1 | Ghi chú |
-|-------|------|----------|----------|---------|
-| BiGRU-CRF | ~12MB | 0.7966 | 0.5918 | Mặc định, CPU-friendly |
-| PhoBERT-CRF | ~540MB | — | — | Cần GPU |
+| Model       | Size   | Micro F1 | Macro F1 | Ghi chú                |
+| ----------- | ------ | -------- | -------- | ---------------------- |
+| BiGRU-CRF   | ~12MB  | 0.7966   | 0.5918   | Mặc định, CPU-friendly |
+| PhoBERT-CRF | ~540MB | —        | —        | Cần GPU                |
 
 ## 📊 Dataset
 
-**VLSP 2018 — UIT-ViSD4SA**
+**UIT-ViSD4SA**
 
 - Train: 7,785 samples
-- Dev: 1,112 samples  
+- Dev: 1,112 samples
 - Test: 2,225 samples
 - 10 aspects × 3 sentiments = 30 label pairs
 
