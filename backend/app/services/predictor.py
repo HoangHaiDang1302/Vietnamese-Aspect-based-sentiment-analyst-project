@@ -41,15 +41,15 @@ class ABSAPredictor:
         return list(self.models.keys())
 
     def load_bigru(self) -> bool:
-        """Load BiGRU-CRF model with Word2Vec vocab from training data."""
+        """Load BiGRU-CRF model with Word2Vec vocab from pretrained model."""
         model_path = BIGRU_CONFIG["model_path"]
         if not os.path.exists(model_path):
             logger.warning(f"BiGRU-CRF weights not found at {model_path}")
             return False
 
         try:
-            logger.info("Building Word2Vec vocabulary from data...")
-            self._build_vocabulary()
+            logger.info("Loading pre-trained Word2Vec vocabulary...")
+            self._load_vocabulary()
 
             vocab_size = len(self.word2idx)
             emb_dim = BIGRU_CONFIG["w2v_dim"]
@@ -82,24 +82,14 @@ class ABSAPredictor:
             logger.error(f"❌ Failed to load BiGRU-CRF: {e}")
             return False
 
-    def _build_vocabulary(self):
-        """Build word2idx from training data (same as training pipeline)."""
+    def _load_vocabulary(self):
+        """Load word2idx from pre-trained Word2Vec model."""
         from gensim.models import Word2Vec
+        w2v_path = BIGRU_CONFIG.get("w2v_path")
+        if not w2v_path or not os.path.exists(w2v_path):
+            raise FileNotFoundError(f"Word2Vec model not found at {w2v_path}")
 
-        texts = []
-        for split in ['train.jsonl', 'dev.jsonl', 'test.jsonl']:
-            path = DATA_DIR / split
-            if path.exists():
-                with open(path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        texts.append(json.loads(line.strip())['text'])
-
-        all_sentences = [t.lower().split() for t in texts]
-        w2v = Word2Vec(
-            all_sentences, vector_size=BIGRU_CONFIG["w2v_dim"],
-            window=5, min_count=2, workers=4, epochs=20, sg=1, seed=42,
-        )
-
+        w2v = Word2Vec.load(str(w2v_path))
         self.word2idx = {'<PAD>': PAD_IDX, '<UNK>': UNK_IDX}
         for i, w in enumerate(w2v.wv.index_to_key):
             self.word2idx[w] = i + 2

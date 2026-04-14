@@ -15,6 +15,7 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "bigru_crf")  # "bigru_crf" or "phobe
 # BiGRU-CRF Config
 BIGRU_CONFIG = {
     "model_path": MODELS_DIR / "bigru_crf.pt",
+    "w2v_path": MODELS_DIR / "word2vec.model",
     "w2v_dim": 150,
     "hidden_dim": 256,
     "num_layers": 2,
