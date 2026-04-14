@@ -32,6 +32,9 @@ async def lifespan(app: FastAPI):
 
     # Load BiGRU-CRF (default — lightweight)
     predictor.load_bigru()
+    
+    # Load PhoBERT-CRF (heavyweight)
+    predictor.load_phobert()
 
     logger.info(f"✅ Models loaded: {predictor.available_models}")
     yield

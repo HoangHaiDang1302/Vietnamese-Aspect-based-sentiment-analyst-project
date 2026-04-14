@@ -82,6 +82,39 @@ class ABSAPredictor:
             logger.error(f"❌ Failed to load BiGRU-CRF: {e}")
             return False
 
+    def load_phobert(self) -> bool:
+        """Load PhoBERT-CRF model."""
+        from ..models.phobert_crf import PhoBERTCRF
+        from transformers import AutoTokenizer
+
+        model_path = PHOBERT_CONFIG["model_path"]
+        if not os.path.exists(model_path):
+            logger.warning(f"PhoBERT-CRF weights not found at {model_path}")
+            return False
+
+        try:
+            logger.info("Loading PhoBERT tokenizer & model (this may take a few seconds)...")
+            self.tokenizer = AutoTokenizer.from_pretrained(PHOBERT_CONFIG["model_name"])
+
+            model = PhoBERTCRF(
+                model_name=PHOBERT_CONFIG["model_name"],
+                num_tags=NUM_TAGS,
+                dropout=PHOBERT_CONFIG["dropout"],
+                pretrained=False
+            ).to(self.device)
+
+            state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
+            model.load_state_dict(state_dict)
+            model.eval()
+
+            self.models["phobert_crf"] = model
+            size_mb = os.path.getsize(model_path) / (1024 * 1024)
+            logger.info(f"✅ PhoBERT-CRF loaded ({size_mb:.1f} MB)")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to load PhoBERT-CRF: {e}")
+            return False
+
     def _load_vocabulary(self):
         """Load word2idx from pre-trained Word2Vec model."""
         from gensim.models import Word2Vec
@@ -112,6 +145,8 @@ class ABSAPredictor:
 
         if model_name == "bigru_crf":
             return self._predict_bigru(text)
+        elif model_name == "phobert_crf":
+            return self._predict_phobert(text)
         else:
             raise ValueError(f"Model '{model_name}' inference not implemented yet")
 
@@ -142,6 +177,72 @@ class ABSAPredictor:
         char_positions = []
         for w in words:
             idx = text_lower.find(w, pos)
+            if idx == -1:
+                idx = pos
+            char_positions.append((idx, idx + len(w)))
+            pos = idx + len(w)
+
+        results = []
+        for label_str, s, e_exc in spans:
+            if "#" not in label_str:
+                continue
+            aspect, sentiment = label_str.split('#')
+            start_char = char_positions[s][0]
+            end_char = char_positions[e_exc - 1][1]
+
+            results.append({
+                "aspect": aspect,
+                "sentiment": sentiment,
+                "text": text[start_char:end_char].strip(),
+                "start": start_char,
+                "end": end_char,
+            })
+
+        return results
+
+    def _predict_phobert(self, text: str) -> List[dict]:
+        """Run PhoBERT-CRF inference."""
+        model = self.models["phobert_crf"]
+        max_len = PHOBERT_CONFIG["max_len"]
+
+        words = text.split()
+        if not words:
+            return []
+
+        # Tokenize subwords and align
+        input_ids = [self.tokenizer.cls_token_id]
+        word_ids_list = []
+        
+        for idx, word in enumerate(words):
+            subwords = self.tokenizer.encode(word, add_special_tokens=False)
+            if not subwords:
+                subwords = [self.tokenizer.unk_token_id]
+            
+            # Stop if we exceed max_len (minus 1 for SEP)
+            if len(input_ids) + len(subwords) >= max_len:
+                break
+                
+            input_ids.extend(subwords)
+            word_ids_list.extend([idx] * len(subwords))
+            
+        input_ids.append(self.tokenizer.sep_token_id)
+        valid_words_len = len(set(word_ids_list))
+
+        tensor_ids = torch.tensor([input_ids]).to(self.device)
+        tensor_mask = torch.ones_like(tensor_ids).to(self.device)
+        tensor_word_ids = torch.tensor([word_ids_list]).to(self.device)
+        tensor_word_count = torch.tensor([valid_words_len]).to(self.device)
+
+        with torch.no_grad():
+            preds = model(tensor_ids, tensor_mask, tensor_word_ids, tensor_word_count)
+            tags = preds['tags'][0][:valid_words_len]
+            spans = bio_tags_to_spans(tags, valid_words_len)
+
+        # Reconstruct characters
+        pos = 0
+        char_positions = []
+        for w in words[:valid_words_len]:
+            idx = text.find(w, pos)
             if idx == -1:
                 idx = pos
             char_positions.append((idx, idx + len(w)))

@@ -5,15 +5,19 @@ High-accuracy model (~540MB) using pre-trained PhoBERT.
 import torch
 import torch.nn as nn
 from torchcrf import CRF
-from transformers import AutoModel
+from transformers import AutoModel, AutoConfig
 
 
 class PhoBERTCRF(nn.Module):
     """PhoBERT + Linear + CRF for ABSA via BIO Sequence Labeling."""
 
-    def __init__(self, model_name: str, num_tags: int = 61, dropout: float = 0.1):
+    def __init__(self, model_name: str, num_tags: int = 61, dropout: float = 0.1, pretrained: bool = True):
         super().__init__()
-        self.phobert = AutoModel.from_pretrained(model_name)
+        if pretrained:
+            self.phobert = AutoModel.from_pretrained(model_name)
+        else:
+            config = AutoConfig.from_pretrained(model_name)
+            self.phobert = AutoModel.from_config(config)
         self.hidden_size = self.phobert.config.hidden_size  # 768
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(self.hidden_size, num_tags)
