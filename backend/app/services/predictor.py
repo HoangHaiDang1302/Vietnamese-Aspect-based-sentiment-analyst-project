@@ -205,13 +205,14 @@ class ABSAPredictor:
         model = self.models["phobert_crf"]
         max_len = PHOBERT_CONFIG["max_len"]
 
-        words = text.split()
+        from ..utils.text_utils import simple_word_tokenize
+        words = simple_word_tokenize(text)
         if not words:
             return []
 
         # Tokenize subwords and align
         input_ids = [self.tokenizer.cls_token_id]
-        word_ids_list = []
+        word_ids_list = [-1]
         
         for idx, word in enumerate(words):
             subwords = self.tokenizer.encode(word, add_special_tokens=False)
@@ -226,7 +227,8 @@ class ABSAPredictor:
             word_ids_list.extend([idx] * len(subwords))
             
         input_ids.append(self.tokenizer.sep_token_id)
-        valid_words_len = len(set(word_ids_list))
+        word_ids_list.append(-1)
+        valid_words_len = len(set([x for x in word_ids_list if x != -1]))
 
         tensor_ids = torch.tensor([input_ids]).to(self.device)
         tensor_mask = torch.ones_like(tensor_ids).to(self.device)
@@ -241,8 +243,9 @@ class ABSAPredictor:
         # Reconstruct characters
         pos = 0
         char_positions = []
+        text_lower = text.lower()
         for w in words[:valid_words_len]:
-            idx = text.find(w, pos)
+            idx = text_lower.find(w, pos)
             if idx == -1:
                 idx = pos
             char_positions.append((idx, idx + len(w)))

@@ -19,5 +19,8 @@ def clean_text(text: str) -> str:
 
 
 def simple_word_tokenize(text: str) -> list:
-    """Simple whitespace tokenizer (no word segmentation dependency)."""
-    return text.lower().split()
+    """Tokenizer that also separates punctuation."""
+    text = text.lower()
+    # Separate common punctuation with spaces
+    text = re.sub(r'([.,!?"()[\]{}])', r' \1 ', text)
+    return text.split()
