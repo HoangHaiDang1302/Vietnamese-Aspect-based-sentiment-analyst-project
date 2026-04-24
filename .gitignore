@@ -34,4 +34,3 @@ phobert_absa_final/
 docker_guide.md
 # If you prefer to track models using Git LFS, ensure .gitattributes is set up.
 # Currently ignoring them per previous .gitignore rules.
-~
