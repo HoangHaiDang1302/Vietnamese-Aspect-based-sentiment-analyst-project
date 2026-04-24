@@ -1,7 +1,7 @@
 """
 E2E Model - End-to-End ABSA with PhoBERT + CRF
 Học chung hệ nhãn Unified Label (Ví dụ: B-CAMERA#POSITIVE)
-Fix: Xử lý special tokens (-100) đúng cách cho CRF.
+Fix: Tính toán word-level emissions dựa trên subword đầu tiên của mỗi từ (word_ids).
 """
 import torch
 import torch.nn as nn
@@ -12,41 +12,71 @@ from torchcrf import CRF
 class E2EPhoBertCRF(nn.Module):
     """
     PhoBERT + CRF cho End-to-End ABSA.
-    Xử lý special tokens: CRF chỉ nhận emissions tại các vị trí word thực sự,
-    bỏ qua hoàn toàn <s>, </s>, <pad> và subword continuation tokens.
+    Chỉ trích xuất token đầu tiên của mỗi word (theo word_ids) để đưa qua CRF.
     """
     def __init__(self, num_unified_tags, dropout=0.3):
         super().__init__()
         self.phobert = RobertaModel.from_pretrained("vinai/phobert-base")
 
+        self.hidden_size = self.phobert.config.hidden_size
         self.dropout = nn.Dropout(dropout)
-        self.hidden2tag = nn.Linear(self.phobert.config.hidden_size, num_unified_tags)
+        self.hidden2tag = nn.Linear(self.hidden_size, num_unified_tags)
         self.crf = CRF(num_unified_tags, batch_first=True)
         self.num_tags = num_unified_tags
 
-    def forward(self, input_ids, attention_mask, labels=None, word_mask=None):
+    def _get_word_emissions(self, input_ids, attention_mask, word_ids, word_counts):
+        """
+        Run PhoBERT, then extract FIRST subword representation per word.
+        Returns: emissions (batch, max_words, num_tags), word_mask (batch, max_words)
+        """
+        outputs = self.phobert(input_ids=input_ids, attention_mask=attention_mask)
+        sequence_output = self.dropout(outputs.last_hidden_state)  # (B, seq_len, 768)
+
+        batch_size = input_ids.size(0)
+        max_words = word_counts.max().item()
+        
+        if max_words == 0:
+            max_words = 1  # prevent error
+
+        word_emissions = torch.zeros(batch_size, max_words, self.hidden_size,
+                                     device=input_ids.device)
+        word_mask = torch.zeros(batch_size, max_words, dtype=torch.bool,
+                                device=input_ids.device)
+
+        for b in range(batch_size):
+            wc = word_counts[b].item()
+            if wc > 0:
+                word_mask[b, :wc] = True
+            
+            seen_words = set()
+            for pos in range(word_ids.size(1)):
+                wid = word_ids[b, pos].item()
+                if wid >= 0 and wid < wc and wid not in seen_words:
+                    word_emissions[b, wid] = sequence_output[b, pos]
+                    seen_words.add(wid)
+
+        emissions = self.hidden2tag(word_emissions)  # (B, max_words, num_tags)
+        return emissions, word_mask
+
+    def forward(self, input_ids, attention_mask, word_ids, word_counts, labels=None):
         """
         Args:
             input_ids: (batch, seq_len)
-            attention_mask: (batch, seq_len) - 1 cho token thực, 0 cho pad
-            labels: (batch, seq_len) - BIO tag IDs, -100 cho special tokens/subwords
-            word_mask: (batch, seq_len) - boolean, True chỉ tại vị trí first-subword
-                       Nếu không truyền, sẽ tự tính từ labels != -100
+            attention_mask: (batch, seq_len)
+            word_ids: (batch, seq_len) mapping subwords to words
+            word_counts: (batch,) number of words per sequence
+            labels: (batch, seq_len) word_tags padded to max_len
         """
-        outputs = self.phobert(input_ids=input_ids, attention_mask=attention_mask)
-        sequence_output = self.dropout(outputs.last_hidden_state)
-        emissions = self.hidden2tag(sequence_output)  # (batch, seq_len, num_tags)
-
-        # Cung cấp mask hoàn hảo cho CRF (Chỉ bao gồm phần tử gốc, bỏ phần Pad ở đuôi).
-        # Sự liên tiếp là đặc biệt sống còn đối với thư viện pytorch-crf.
-        crf_mask = attention_mask.bool()
+        emissions, word_mask = self._get_word_emissions(
+            input_ids, attention_mask, word_ids, word_counts)
 
         if labels is not None:
-            # -100 chỉ tồn tại ở các khoảng Padding do dataset truyền
-            clean_labels = labels.clone()
-            clean_labels[clean_labels == -100] = 0
-
-            loss = -self.crf(emissions, tags=clean_labels, mask=crf_mask, reduction='mean')
+            max_words = word_counts.max().item()
+            if max_words == 0:
+                max_words = 1
+            # Lấy tags tương ứng với max_words
+            tags = labels[:, :max_words]
+            loss = -self.crf(emissions, tags, mask=word_mask, reduction='mean')
             return loss
         else:
-            return self.crf.decode(emissions, mask=crf_mask)
+            return self.crf.decode(emissions, mask=word_mask)

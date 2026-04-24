@@ -239,93 +239,114 @@ def train_asc_model(model, train_loader, dev_loader, device,
 # ============================================================
 # 3. E2E (PhoBERT) TRAINING ENGINE
 # ============================================================
-def train_epoch_e2e(model, loader, optimizer, device):
-    """Một epoch huấn luyện cho E2E PhoBERT-CRF"""
+def train_epoch_e2e(model, loader, optimizer, scheduler, device):
+    """Một epoch huấn luyện cho E2E PhoBERT-CRF với Word-Level Alignment"""
     model.train()
     total_loss = 0
     for batch in tqdm(loader, leave=False, desc="Training"):
         optimizer.zero_grad()
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
-        tags = batch['tags'].to(device)
+        word_ids = batch['word_ids'].to(device)
+        word_count = batch['word_count'].to(device)
+        tags = batch['word_tags'].to(device)
 
-        # Model tự xử lý -100 thông qua word_mask bên trong
-        loss = model(input_ids, attention_mask, labels=tags)
+        loss = model(input_ids, attention_mask, word_ids, word_count, labels=tags)
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        scheduler.step()
         total_loss += loss.item()
     return total_loss / len(loader)
 
 
 def predict_e2e(model, loader, device):
-    """Dự đoán cho E2E. Chỉ trả về tags tại vị trí word thực (bỏ special tokens)."""
+    """Dự đoán cho E2E. Căn cứ trên word_count thực tế để cắt tags."""
     model.eval()
     all_pred_tags, all_true_tags, all_lengths = [], [], []
     total_loss = 0
+    correct, total_tokens = 0, 0
 
     with torch.no_grad():
         for batch in loader:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
-            tags = batch['tags'].to(device)
+            word_ids = batch['word_ids'].to(device)
+            word_count = batch['word_count'].to(device)
+            tags = batch['word_tags'].to(device)
 
             # Loss
-            loss = model(input_ids, attention_mask, labels=tags)
+            loss = model(input_ids, attention_mask, word_ids, word_count, labels=tags)
             total_loss += loss.item()
 
-            # Decode (model chỉ trả về tags tại word_mask=True)
-            pred_tags = model(input_ids, attention_mask)
+            # Decode
+            pred_tags = model(input_ids, attention_mask, word_ids, word_count)
 
-            # Filter: chỉ giữ vị trí labels != -100 (first-subword positions)
-            for i in range(len(batch['input_ids'])):
-                word_mask = (tags[i] != -100).cpu().tolist()
-                true_i = tags[i].cpu().tolist()
+            for i in range(len(word_count)):
+                length = word_count[i].item()
+                if length == 0: continue
+                pred = pred_tags[i][:length]
+                true = tags[i][:length].cpu().tolist()
+                
+                all_pred_tags.append(pred)
+                all_true_tags.append(true)
+                all_lengths.append(length)
+                
+                for p, t in zip(pred, true):
+                    if p == t: correct += 1
+                    total_tokens += 1
 
-                true_filtered = [t for t, m in zip(true_i, word_mask) if m]
-                # pred_tags[i] đã được CRF decode chỉ tại word_mask positions
-                pred_filtered = pred_tags[i][:len(true_filtered)]
-
-                all_pred_tags.append(pred_filtered)
-                all_true_tags.append(true_filtered)
-                all_lengths.append(len(true_filtered))
+    tok_acc = correct / max(1, total_tokens)
 
     return {
         'loss': total_loss / len(loader),
         'pred_tags': all_pred_tags,
         'true_tags': all_true_tags,
-        'lengths': all_lengths
+        'lengths': all_lengths,
+        'tok_acc': tok_acc
     }
 
 
 def train_e2e_model(model, train_loader, dev_loader, device,
                     lr=2e-5, epochs=15, patience=5, model_name="PhoBERT-CRF"):
-    """Vòng lặp chính: Train E2E PhoBERT model"""
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
+    """Vòng lặp chính: Train E2E PhoBERT model với Differential LR và Early Stopping bằng Acc/F1"""
+    from transformers import get_linear_schedule_with_warmup
 
-    best_metric, best_state, wait = float('inf'), None, 0
-    history = {'train_loss': [], 'dev_loss': [], 'lr': []}
+    # Differential Learning Rates
+    bert_params = list(model.phobert.parameters())
+    head_params = list(model.hidden2tag.parameters()) + list(model.crf.parameters())
+    
+    optimizer = torch.optim.AdamW([
+        {'params': bert_params, 'lr': lr, 'weight_decay': 0.01},
+        {'params': head_params, 'lr': 1e-3, 'weight_decay': 0.0},
+    ])
+    
+    total_steps = len(train_loader) * epochs
+    warmup_steps = int(total_steps * 0.1)
+    scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
+
+    best_metric, best_state, wait = 0, None, 0
+    history = {'train_loss': [], 'dev_loss': [], 'dev_tok_acc': [], 'lr': []}
 
     print(f"\n{'='*60}")
-    print(f"  Training {model_name} (PhoBERT)")
+    print(f"  Training {model_name} (PhoBERT) - Differential LR")
     print(f"{'='*60}")
 
     for ep in range(epochs):
         t0 = time.time()
-        train_loss = train_epoch_e2e(model, train_loader, optimizer, device)
+        train_loss = train_epoch_e2e(model, train_loader, optimizer, scheduler, device)
         dev_res = predict_e2e(model, dev_loader, device)
 
-        current_lr = optimizer.param_groups[0]['lr']
-        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
 
         history['train_loss'].append(train_loss)
         history['dev_loss'].append(dev_res['loss'])
+        history['dev_tok_acc'].append(dev_res['tok_acc'])
         history['lr'].append(current_lr)
 
         mark = ''
-        if dev_res['loss'] < best_metric:
-            best_metric = dev_res['loss']
+        if dev_res['tok_acc'] > best_metric:
+            best_metric = dev_res['tok_acc']
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             wait = 0
             mark = ' ***'
@@ -334,11 +355,11 @@ def train_e2e_model(model, train_loader, dev_loader, device,
 
         elapsed = time.time() - t0
         print(f"  Ep {ep+1:2d}/{epochs} | Train Loss: {train_loss:.4f} | "
-              f"Dev Loss: {dev_res['loss']:.4f} | "
+              f"Dev Loss: {dev_res['loss']:.4f} | TokAcc: {dev_res['tok_acc']:.4f} | "
               f"LR: {current_lr:.2e} | {elapsed:.1f}s{mark}")
 
         if wait >= patience:
-            print(f"  Early stopping at epoch {ep+1}")
+            print(f"  Early stopping at epoch {ep+1} (Best TokAcc: {best_metric:.4f})")
             break
 
     if best_state:
