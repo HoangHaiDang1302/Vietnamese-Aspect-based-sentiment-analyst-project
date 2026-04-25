@@ -30,11 +30,16 @@ def plot_training_curves(histories, save_path=None):
     axes[1].set_ylabel('Loss')
     axes[1].legend(fontsize=8)
 
-    # Dev Metric (tok_acc hoặc dev_acc)
+    # Dev Metric (tok_acc, span_f1, dev_f1, dev_acc)
     for name, hist in histories.items():
-        metric_key = 'dev_tok_acc' if 'dev_tok_acc' in hist else 'dev_acc'
-        if metric_key in hist:
-            axes[2].plot(hist[metric_key], label=name, marker='^', markersize=3)
+        # Try multiple metric keys in order of priority
+        metric_key = None
+        for key in ['dev_span_f1', 'dev_f1', 'dev_tok_acc', 'dev_acc']:
+            if key in hist:
+                metric_key = key
+                break
+        if metric_key:
+            axes[2].plot(hist[metric_key], label=f"{name} ({metric_key})", marker='^', markersize=3)
     axes[2].set_title('Validation Metric', fontsize=13)
     axes[2].set_xlabel('Epoch')
     axes[2].set_ylabel('Score')

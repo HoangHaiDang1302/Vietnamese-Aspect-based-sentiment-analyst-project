@@ -61,7 +61,7 @@ print(f"Train: {len(train_items)} | Dev: {len(dev_items)} | Test: {len(test_item
 MAX_LEN = 256; BATCH_SIZE = 16
 
 print("Tokenizing with PhoBERT...")
-train_ds = E2EDataset(train_items, max_len=MAX_LEN)
+train_ds = E2EDataset(train_items, max_len=MAX_LEN, is_train=True)
 dev_ds = E2EDataset(dev_items, max_len=MAX_LEN)
 test_ds = E2EDataset(test_items, max_len=MAX_LEN)
 
@@ -76,7 +76,7 @@ all_models, all_histories, all_results = {}, {}, []
 
 for lr in LR_OPTIONS:
     name = f"PhoBERT-CRF_lr{lr}"
-    model = E2EPhoBertCRF(num_unified_tags=NUM_TAGS, dropout=0.3).to(device)
+    model = E2EPhoBertCRF(num_unified_tags=NUM_TAGS, dropout=0.1).to(device)
     model, history = train_e2e_model(model, train_loader, dev_loader, device,
         lr=lr, epochs=15, patience=5, model_name=name)
     all_models[name] = model; all_histories[name] = history

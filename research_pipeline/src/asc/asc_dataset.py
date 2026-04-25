@@ -15,7 +15,7 @@ class ASCDataset(Dataset):
         d_map = {"POSITIVE": 0, "NEGATIVE": 1, "NEUTRAL": 2}
         
         for item in items:
-            orig_text = item['text']
+            orig_text = item['text']  # Đã được segment (có _ nối từ ghép)
             spans = item.get('labels', [])
             
             # Nếu 1 câu có nhiều aspect, tách thành NHIỀU SAMPLES (Mỗi Aspect một dòng riêng biệt)
@@ -23,8 +23,28 @@ class ASCDataset(Dataset):
                 if "#" in raw_label:
                     aspect, sentiment = raw_label.split("#")
                     if sentiment in d_map:
-                        # Kỹ thuật bọc ngụy trang để làm nổi bật vị trí Aspect
-                        marked_text = orig_text[:s_char] + f" [ASP] {orig_text[s_char:e_char]} [ASP] " + orig_text[e_char:]
+                        # Tìm vị trí word-level tương ứng với char offset trên text gốc
+                        # Chèn [ASP] marker vào segmented text
+                        words = orig_text.split()
+                        pos = 0
+                        start_word, end_word = None, None
+                        for w_idx, w in enumerate(words):
+                            w_clean = w.replace('_', ' ')
+                            w_len = len(w_clean)
+                            if start_word is None and pos + w_len > s_char:
+                                start_word = w_idx
+                            if pos < e_char:
+                                end_word = w_idx + 1
+                            pos += w_len + 1  # +1 for space
+                        
+                        if start_word is not None and end_word is not None:
+                            # Insert [ASP] markers at word boundaries
+                            marked_words = (words[:start_word] + ['[ASP]'] + 
+                                          words[start_word:end_word] + ['[ASP]'] + 
+                                          words[end_word:])
+                            marked_text = ' '.join(marked_words)
+                        else:
+                            marked_text = orig_text
                         
                         seq, length = tokenize_baseline(marked_text, word2idx, max_len)
                         

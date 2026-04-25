@@ -14,9 +14,9 @@ class E2EPhoBertCRF(nn.Module):
     PhoBERT + CRF cho End-to-End ABSA.
     Chỉ trích xuất token đầu tiên của mỗi word (theo word_ids) để đưa qua CRF.
     """
-    def __init__(self, num_unified_tags, dropout=0.3):
+    def __init__(self, num_unified_tags, dropout=0.1):
         super().__init__()
-        self.phobert = RobertaModel.from_pretrained("vinai/phobert-base")
+        self.phobert = RobertaModel.from_pretrained("vinai/phobert-base-v2")
 
         self.hidden_size = self.phobert.config.hidden_size
         self.dropout = nn.Dropout(dropout)

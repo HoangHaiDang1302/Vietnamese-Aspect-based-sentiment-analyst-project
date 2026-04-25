@@ -131,7 +131,7 @@ class E2EDataset(Dataset):
     and word-level feature alignment for CRF.
     Includes data oversampling for minority tags.
     """
-    def __init__(self, items, tokenizer_name="vinai/phobert-base", max_len=128, is_train=False):
+    def __init__(self, items, tokenizer_name="vinai/phobert-base-v2", max_len=128, is_train=False):
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         
         print(f"Tokenizing {len(items)} items...")
