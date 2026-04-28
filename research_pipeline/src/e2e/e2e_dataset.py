@@ -3,19 +3,28 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 import os
 from collections import Counter
-import py_vncorenlp
 
-# Download VnCoreNLP model if it doesn't exist
-vncorenlp_dir = os.path.abspath('./VnCoreNLP')
-if not os.path.exists(vncorenlp_dir):
-    os.makedirs(vncorenlp_dir, exist_ok=True)
-    py_vncorenlp.download_model(save_dir=vncorenlp_dir)
+# Word Segmentation: try py_vncorenlp first, fallback to underthesea
+_segmenter = None
+_seg_type = None
 
-# Initialize rdrsegmenter globally to avoid reloading
 try:
-    rdrsegmenter = py_vncorenlp.VnCoreNLP(annotators=["wseg"], save_dir=vncorenlp_dir)
-except:
-    rdrsegmenter = None
+    import py_vncorenlp
+    vncorenlp_dir = os.path.abspath('./VnCoreNLP')
+    if not os.path.exists(vncorenlp_dir):
+        os.makedirs(vncorenlp_dir, exist_ok=True)
+        py_vncorenlp.download_model(save_dir=vncorenlp_dir)
+    _segmenter = py_vncorenlp.VnCoreNLP(annotators=["wseg"], save_dir=vncorenlp_dir)
+    _seg_type = "vncorenlp"
+    print("[e2e_dataset] Using py_vncorenlp for segmentation")
+except Exception:
+    try:
+        from underthesea import word_tokenize
+        _segmenter = word_tokenize
+        _seg_type = "underthesea"
+        print("[e2e_dataset] Using underthesea for segmentation")
+    except Exception:
+        print("[e2e_dataset] WARNING: No segmenter available, using raw text")
 
 # Unified Tags System
 ASPECTS = ["CAMERA","FEATURES","PERFORMANCE","DESIGN","PRICE",
@@ -32,13 +41,18 @@ TAG2ID = {t:i for i,t in enumerate(BIO_TAGS)}
 NUM_TAGS = len(BIO_TAGS)
 
 def segment_text(text):
-    if rdrsegmenter is None:
-        return text
-    try:
-        sentences = rdrsegmenter.word_segment(text)
-        return " ".join(sentences)
-    except:
-        return text
+    if _seg_type == "vncorenlp":
+        try:
+            sentences = _segmenter.word_segment(text)
+            return " ".join(sentences)
+        except:
+            return text
+    elif _seg_type == "underthesea":
+        try:
+            return _segmenter(text, format="text")
+        except:
+            return text
+    return text
 
 def tokenize_and_align(item, tokenizer, max_len):
     """Tokenize segmented text with PhoBERT, align character-level spans to word tokens."""

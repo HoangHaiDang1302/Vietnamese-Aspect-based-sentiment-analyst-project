@@ -43,6 +43,42 @@ def bio_tags_to_spans(tag_ids, bio_tags_list, max_tokens):
 
 
 # ============================================================
+# 1b. CHARACTER SPANS → WORD SPANS (Dùng cho Pipeline eval)
+# ============================================================
+def char_spans_to_word_spans(text, raw_labels, max_len):
+    """
+    Chuyển character-level ground truth spans → word-level spans.
+    Input:  raw_labels = [(start_char, end_char, "CAMERA#POSITIVE"), ...]
+    Output: [("CAMERA#POSITIVE", start_word, end_word), ...]
+    Dùng để so sánh span-level với predictions từ Pipeline (NB03).
+    """
+    words = text.split()[:max_len]
+    positions = []
+    pos = 0
+    text_lower = text.lower()
+
+    for w in words:
+        w_clean = w.replace('_', ' ')
+        idx = text_lower.find(w_clean, pos)
+        if idx == -1:
+            idx = pos
+        positions.append((idx, idx + len(w_clean)))
+        pos = idx + len(w_clean)
+
+    spans = []
+    for start_char, end_char, raw_label in raw_labels:
+        word_indices = []
+        for t_idx in range(len(words)):
+            t_start, t_end = positions[t_idx]
+            if t_start < end_char and t_end > start_char:
+                word_indices.append(t_idx)
+        if word_indices:
+            spans.append((raw_label, word_indices[0], word_indices[-1] + 1))
+
+    return spans
+
+
+# ============================================================
 # 2. SPAN-LEVEL F1 (Chính xác cho ATE)
 # ============================================================
 def evaluate_spans_f1(pred_spans_list, true_spans_list):
@@ -61,6 +97,39 @@ def evaluate_spans_f1(pred_spans_list, true_spans_list):
     r = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
     return {'precision': p, 'recall': r, 'f1': f1, 'tp': tp, 'fp': fp, 'fn': fn}
+
+
+# ============================================================
+# 2b. BIO TAGS → SENTENCE-LEVEL MULTI-LABEL (Dùng cho tất cả notebooks)
+# ============================================================
+def bio_to_sentence_labels(tag_ids_list, lengths, bio_tags_list, label_names):
+    """
+    Chuyển BIO tag sequences → sentence-level multi-label binary vectors.
+    Giống cách phobert-crf-absa.ipynb đánh giá.
+
+    Args:
+        tag_ids_list: list of tag_id sequences (per sentence)
+        lengths: list of actual lengths
+        bio_tags_list: danh sách BIO tag names (vd ['O','B-CAMERA#POS',...])
+        label_names: danh sách label names (vd ['CAMERA#POSITIVE',...])
+    Returns:
+        sent_labels: np.array (N, num_labels) binary matrix
+        all_spans: list of span lists per sentence
+    """
+    label2id = {ln: i for i, ln in enumerate(label_names)}
+    num_labels = len(label_names)
+    sent_labels, all_spans = [], []
+
+    for tag_ids, length in zip(tag_ids_list, lengths):
+        spans = bio_tags_to_spans(tag_ids, bio_tags_list, length)
+        label_vec = [0] * num_labels
+        for label_name, _, _ in spans:
+            if label_name in label2id:
+                label_vec[label2id[label_name]] = 1
+        sent_labels.append(label_vec)
+        all_spans.append(spans)
+
+    return np.array(sent_labels), all_spans
 
 
 # ============================================================
