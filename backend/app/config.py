@@ -14,7 +14,7 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "bigru_crf")  # "bigru_crf" or "phobe
 
 # BiGRU-CRF Config
 BIGRU_CONFIG = {
-    "model_path": MODELS_DIR / "bigru_crf.pt",
+    "model_path": MODELS_DIR / "best_e2e_baseline_BiGRU-CRF.pt",
     "w2v_path": MODELS_DIR / "word2vec.model",
     "w2v_dim": 150,
     "hidden_dim": 256,
@@ -25,7 +25,7 @@ BIGRU_CONFIG = {
 
 # PhoBERT-CRF Config
 PHOBERT_CONFIG = {
-    "model_path": MODELS_DIR / "phobert_crf.pt",
+    "model_path": MODELS_DIR / "best_e2e_phobert.pt",
     "model_name": "vinai/phobert-base-v2",
     "max_len": 256,
     "dropout": 0.1,
