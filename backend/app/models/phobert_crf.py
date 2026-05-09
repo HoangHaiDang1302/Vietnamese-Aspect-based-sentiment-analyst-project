@@ -20,7 +20,7 @@ class PhoBERTCRF(nn.Module):
             self.phobert = AutoModel.from_config(config)
         self.hidden_size = self.phobert.config.hidden_size  # 768
         self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(self.hidden_size, num_tags)
+        self.hidden2tag = nn.Linear(self.hidden_size, num_tags)
         self.crf = CRF(num_tags, batch_first=True)
 
     def _get_word_emissions(self, input_ids, attention_mask, word_ids, word_count):
@@ -51,7 +51,7 @@ class PhoBERTCRF(nn.Module):
                     word_emissions[b, wid] = sequence_output[b, pos]
                     seen_words.add(wid)
 
-        emissions = self.classifier(word_emissions)
+        emissions = self.hidden2tag(word_emissions)
         return emissions, word_mask
 
     def forward(self, input_ids, attention_mask, word_ids, word_count, word_tags=None):

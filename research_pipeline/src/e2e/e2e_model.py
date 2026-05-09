@@ -3,6 +3,12 @@ E2E Model - End-to-End ABSA with PhoBERT + CRF
 Học chung hệ nhãn Unified Label (Ví dụ: B-CAMERA#POSITIVE)
 Fix: Tính toán word-level emissions dựa trên subword đầu tiên của mỗi từ (word_ids).
 """
+import os
+
+os.environ["USE_TF"] = "0"
+os.environ["USE_FLAX"] = "0"
+os.environ["TRANSFORMERS_NO_TF"] = "1"
+
 import torch
 import torch.nn as nn
 from transformers import RobertaModel

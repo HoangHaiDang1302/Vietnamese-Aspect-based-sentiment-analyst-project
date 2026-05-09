@@ -48,14 +48,23 @@ class ABSAPredictor:
             return False
 
         try:
-            logger.info("Loading pre-trained Word2Vec vocabulary...")
-            self._load_vocabulary()
+            # 1. Load state_dict first to check the expected vocabulary size
+            state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
+            checkpoint_vocab_size = state_dict['emb.weight'].shape[0]
+            logger.info(f"BiGRU-CRF checkpoint expects vocab_size={checkpoint_vocab_size}")
 
+            # 2. Load vocabulary with the matching limit
+            self._load_vocabulary(limit=checkpoint_vocab_size - 2)
+            
             vocab_size = len(self.word2idx)
+            if vocab_size != checkpoint_vocab_size:
+                 logger.warning(f"Vocab mismatch: loaded {vocab_size}, but checkpoint needs {checkpoint_vocab_size}. Adjusting...")
+                 # This shouldn't happen with the limit, but just in case
+
             emb_dim = BIGRU_CONFIG["w2v_dim"]
             hidden_dim = BIGRU_CONFIG["hidden_dim"]
 
-            # Build embedding matrix (random init, weights loaded from checkpoint)
+            # Build embedding matrix
             emb_matrix = np.random.normal(0, 0.1, (vocab_size, emb_dim)).astype(np.float32)
             emb_matrix[PAD_IDX] = 0
 
@@ -70,7 +79,6 @@ class ABSAPredictor:
                 pad_idx=PAD_IDX,
             ).to(self.device)
 
-            state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
             model.load_state_dict(state_dict)
             model.eval()
 
@@ -80,6 +88,8 @@ class ABSAPredictor:
             return True
         except Exception as e:
             logger.error(f"❌ Failed to load BiGRU-CRF: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     def load_phobert(self) -> bool:
@@ -115,7 +125,7 @@ class ABSAPredictor:
             logger.error(f"❌ Failed to load PhoBERT-CRF: {e}")
             return False
 
-    def _load_vocabulary(self):
+    def _load_vocabulary(self, limit: Optional[int] = None):
         """Load word2idx from pre-trained Word2Vec model."""
         from gensim.models import Word2Vec
         w2v_path = BIGRU_CONFIG.get("w2v_path")
@@ -124,7 +134,12 @@ class ABSAPredictor:
 
         w2v = Word2Vec.load(str(w2v_path))
         self.word2idx = {'<PAD>': PAD_IDX, '<UNK>': UNK_IDX}
-        for i, w in enumerate(w2v.wv.index_to_key):
+        
+        keys = w2v.wv.index_to_key
+        if limit is not None:
+            keys = keys[:limit]
+            
+        for i, w in enumerate(keys):
             self.word2idx[w] = i + 2
 
     def predict(self, text: str, model_name: str = "bigru_crf") -> List[dict]:
