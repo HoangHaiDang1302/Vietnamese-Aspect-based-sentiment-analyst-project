@@ -1,238 +1,436 @@
-/**
- * Vietnamese ABSA — Frontend Application Logic
- * Handles API calls, result rendering, and UI interactions.
- */
-
-// === Constants ===
 const API_BASE = window.location.origin;
-const ASPECT_ICONS = {
-    "CAMERA": "📷", "FEATURES": "⚡", "PERFORMANCE": "🚀",
-    "DESIGN": "🎨", "PRICE": "💰", "GENERAL": "📱",
-    "SCREEN": "🖥️", "BATTERY": "🔋", "STORAGE": "💾",
-    "SER&ACC": "🛎️",
+const SENTIMENTS = ["POSITIVE", "NEUTRAL", "NEGATIVE"];
+
+const SENTIMENT_LABELS = {
+    POSITIVE: "Tích cực",
+    NEUTRAL: "Trung lập",
+    NEGATIVE: "Tiêu cực",
 };
-const SENTIMENT_EMOJI = { "POSITIVE": "😊", "NEUTRAL": "😐", "NEGATIVE": "😞" };
-const SENTIMENT_VI = { "POSITIVE": "Tích cực", "NEUTRAL": "Trung lập", "NEGATIVE": "Tiêu cực" };
 
-// === DOM Elements ===
-const reviewInput = document.getElementById('review-input');
-const charCount = document.getElementById('char-count');
-const btnAnalyze = document.getElementById('btn-analyze');
-const modelSelect = document.getElementById('model-select');
-const resultsSection = document.getElementById('results-section');
-const emptyState = document.getElementById('empty-state');
-const exampleChips = document.getElementById('example-chips');
+const SENTIMENT_CLASSES = {
+    POSITIVE: "positive",
+    NEUTRAL: "neutral",
+    NEGATIVE: "negative",
+};
 
-// Metrics
-const metricAspects = document.getElementById('metric-aspects');
-const metricSpans = document.getElementById('metric-spans');
-const metricOverall = document.getElementById('metric-overall');
-const metricOverallIcon = document.getElementById('metric-overall-icon');
+const SENTIMENT_COLORS = {
+    POSITIVE: "#16a34a",
+    NEUTRAL: "#d97706",
+    NEGATIVE: "#dc2626",
+};
 
-// Results
-const highlightText = document.getElementById('highlight-text');
-const spansList = document.getElementById('spans-list');
+const ASPECT_LABELS = {
+    CAMERA: "Camera",
+    FEATURES: "Tính năng",
+    PERFORMANCE: "Hiệu năng",
+    DESIGN: "Thiết kế",
+    PRICE: "Giá",
+    GENERAL: "Tổng quan",
+    SCREEN: "Màn hình",
+    BATTERY: "Pin",
+    STORAGE: "Bộ nhớ",
+    "SER&ACC": "Dịch vụ & phụ kiện",
+};
 
-// === Event Listeners ===
-reviewInput.addEventListener('input', () => {
-    charCount.textContent = `${reviewInput.value.length} / 2000`;
+let currentResult = null;
+
+const dom = {
+    apiStatus: document.getElementById("api-status"),
+    apiStatusText: document.getElementById("api-status-text"),
+    modelSelect: document.getElementById("model-select"),
+    reviewInput: document.getElementById("review-input"),
+    charCount: document.getElementById("char-count"),
+    exampleChips: document.getElementById("example-chips"),
+    btnAnalyze: document.getElementById("btn-analyze"),
+    statAspects: document.getElementById("stat-aspects"),
+    statSpans: document.getElementById("stat-spans"),
+    statPositive: document.getElementById("stat-positive"),
+    statDominant: document.getElementById("stat-dominant"),
+    sentimentTotal: document.getElementById("sentiment-total"),
+    aspectTotal: document.getElementById("aspect-total"),
+    sentimentChart: document.getElementById("sentiment-chart"),
+    aspectChart: document.getElementById("aspect-chart"),
+    aspectFilter: document.getElementById("aspect-filter"),
+    aspectTableBody: document.getElementById("aspect-table-body"),
+    emptyState: document.getElementById("empty-state"),
+    resultsList: document.getElementById("results-list"),
+    toast: document.getElementById("toast"),
+};
+
+dom.reviewInput.addEventListener("input", () => {
+    dom.charCount.textContent = `${dom.reviewInput.value.length} / 2000`;
 });
 
-btnAnalyze.addEventListener('click', handleAnalyze);
-
-// Enter key shortcut (Ctrl/Cmd + Enter)
-reviewInput.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        handleAnalyze();
+dom.reviewInput.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        analyzeText();
     }
 });
 
-// Example chips
-exampleChips.addEventListener('click', (e) => {
-    const chip = e.target.closest('.chip');
-    if (chip) {
-        reviewInput.value = chip.dataset.text;
-        charCount.textContent = `${reviewInput.value.length} / 2000`;
-        reviewInput.focus();
-    }
+dom.btnAnalyze.addEventListener("click", analyzeText);
+dom.aspectFilter.addEventListener("change", renderDashboard);
+
+dom.exampleChips.addEventListener("click", (event) => {
+    const chip = event.target.closest(".chip");
+    if (!chip) return;
+    dom.reviewInput.value = chip.dataset.text;
+    dom.charCount.textContent = `${dom.reviewInput.value.length} / 2000`;
+    dom.reviewInput.focus();
 });
 
-// === Main Analysis Handler ===
-async function handleAnalyze() {
-    const text = reviewInput.value.trim();
+async function analyzeText() {
+    const text = dom.reviewInput.value.trim();
     if (!text) {
-        showToast('⚠️ Vui lòng nhập đánh giá sản phẩm');
+        showToast("Vui lòng nhập nội dung đánh giá.");
         return;
     }
 
-    const model = modelSelect.value;
     setLoading(true);
-
     try {
         const response = await fetch(`${API_BASE}/api/predict`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, model }),
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                text,
+                model: dom.modelSelect.value,
+            }),
         });
 
         if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.detail || `Server error: ${response.status}`);
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.detail || "Không thể phân tích văn bản.");
         }
 
         const data = await response.json();
-        renderResults(data);
+        currentResult = {
+            text: data.text,
+            modelUsed: data.model_used,
+            spans: data.spans || [],
+            summary: data.summary || {},
+        };
+        dom.aspectFilter.value = "ALL";
+        renderDashboard();
+        document.querySelector(".analysis-area").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
-        console.error('Prediction error:', error);
-        showToast(`❌ ${error.message}`);
+        showToast(error.message);
     } finally {
         setLoading(false);
     }
 }
 
-// === Render Results ===
-function renderResults(data) {
-    const { spans, summary } = data;
+function renderDashboard() {
+    const summary = buildSummary(currentResult);
+    const selectedAspect = dom.aspectFilter.value;
+    const spans = currentResult?.spans || [];
+    const filteredSpans = selectedAspect === "ALL"
+        ? spans
+        : spans.filter((span) => span.aspect === selectedAspect);
 
-    // Show results, hide empty state
-    resultsSection.style.display = 'block';
-    emptyState.style.display = 'none';
-
-    // Metrics
-    metricAspects.textContent = summary.unique_aspects || 0;
-    metricSpans.textContent = summary.total_spans || 0;
-
-    const sc = summary.sentiment_counts || {};
-    const pos = sc.POSITIVE || 0;
-    const neg = sc.NEGATIVE || 0;
-    if (spans.length === 0) {
-        metricOverall.textContent = '—';
-        metricOverallIcon.textContent = '🤷';
-    } else if (pos > neg) {
-        metricOverall.textContent = 'Tích cực';
-        metricOverallIcon.textContent = '😊';
-    } else if (neg > pos) {
-        metricOverall.textContent = 'Tiêu cực';
-        metricOverallIcon.textContent = '😞';
-    } else {
-        metricOverall.textContent = 'Trung lập';
-        metricOverallIcon.textContent = '😐';
-    }
-
-    // Highlighted text
-    highlightText.innerHTML = buildHighlightedHTML(data.text, spans);
-
-    // Span cards
-    renderSpanCards(spans);
-
-    // Scroll to results
-    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateStats(summary);
+    renderAspectFilter(summary.aspectCounts);
+    renderAspectTable(summary.aspectCounts);
+    renderResultDetail(currentResult, filteredSpans);
+    drawSentimentChart(summary.sentimentCounts);
+    drawAspectChart(summary.aspectCounts);
 }
 
-// === Build Highlighted Text HTML ===
-function buildHighlightedHTML(text, spans) {
-    if (!spans.length) return escapeHtml(text);
+function buildSummary(result) {
+    const sentimentCounts = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0 };
+    const aspectCounts = {};
+    const spans = result?.spans || [];
 
-    // Sort by start position, resolve overlaps (keep first)
-    const sorted = [...spans].sort((a, b) => a.start - b.start);
-    const clean = [];
-    let lastEnd = -1;
-    for (const span of sorted) {
-        if (span.start >= lastEnd) {
-            clean.push(span);
-            lastEnd = span.end;
+    spans.forEach((span) => {
+        const sentiment = normalizeSentiment(span.sentiment);
+        const aspect = span.aspect || "GENERAL";
+
+        sentimentCounts[sentiment] = (sentimentCounts[sentiment] || 0) + 1;
+        if (!aspectCounts[aspect]) {
+            aspectCounts[aspect] = { POSITIVE: 0, NEUTRAL: 0, NEGATIVE: 0, total: 0 };
         }
-    }
+        aspectCounts[aspect][sentiment] += 1;
+        aspectCounts[aspect].total += 1;
+    });
 
-    let html = '';
-    let pos = 0;
-    for (const span of clean) {
-        if (span.start > pos) {
-            html += escapeHtml(text.slice(pos, span.start));
-        }
-        const hlClass = `hl-${span.sentiment.toLowerCase()}`;
-        const icon = ASPECT_ICONS[span.aspect] || '📌';
-        html += `<span class="${hlClass}">${escapeHtml(text.slice(span.start, span.end))}<span class="hl-label">${icon}${span.aspect}</span></span>`;
-        pos = span.end;
-    }
-    if (pos < text.length) {
-        html += escapeHtml(text.slice(pos));
-    }
-
-    return html;
+    return {
+        totalSpans: spans.length,
+        uniqueAspects: Object.keys(aspectCounts).length,
+        sentimentCounts,
+        aspectCounts,
+    };
 }
 
-// === Render Span Cards ===
-function renderSpanCards(spans) {
-    if (!spans.length) {
-        spansList.innerHTML = '<div class="no-results">❌ Không phát hiện khía cạnh nào</div>';
+function updateStats(summary) {
+    dom.statAspects.textContent = summary.uniqueAspects;
+    dom.statSpans.textContent = summary.totalSpans;
+    dom.statPositive.textContent = summary.sentimentCounts.POSITIVE || 0;
+    dom.statDominant.textContent = getDominantSentiment(summary.sentimentCounts);
+    dom.sentimentTotal.textContent = `${summary.totalSpans} nhãn`;
+    dom.aspectTotal.textContent = `${summary.uniqueAspects} nhóm`;
+}
+
+function renderAspectFilter(aspectCounts) {
+    const current = dom.aspectFilter.value;
+    const options = Object.keys(aspectCounts)
+        .sort((a, b) => aspectCounts[b].total - aspectCounts[a].total)
+        .map((aspect) => `<option value="${escapeHtml(aspect)}">${escapeHtml(getAspectLabel(aspect))}</option>`)
+        .join("");
+
+    dom.aspectFilter.innerHTML = `<option value="ALL">Tất cả khía cạnh</option>${options}`;
+    dom.aspectFilter.value = Object.prototype.hasOwnProperty.call(aspectCounts, current) ? current : "ALL";
+}
+
+function renderAspectTable(aspectCounts) {
+    const rows = Object.entries(aspectCounts)
+        .sort((a, b) => b[1].total - a[1].total)
+        .map(([aspect, counts]) => `
+            <tr>
+                <td><strong>${escapeHtml(getAspectLabel(aspect))}</strong><span>${escapeHtml(aspect)}</span></td>
+                <td class="positive-text">${counts.POSITIVE || 0}</td>
+                <td class="neutral-text">${counts.NEUTRAL || 0}</td>
+                <td class="negative-text">${counts.NEGATIVE || 0}</td>
+                <td>${counts.total}</td>
+            </tr>
+        `)
+        .join("");
+
+    dom.aspectTableBody.innerHTML = rows || `<tr><td colspan="5" class="table-empty">Chưa có khía cạnh được phát hiện</td></tr>`;
+}
+
+function renderResultDetail(result, spans) {
+    if (!result) {
+        dom.emptyState.hidden = false;
+        dom.resultsList.innerHTML = "";
         return;
     }
 
-    spansList.innerHTML = spans.map((span, i) => {
-        const icon = ASPECT_ICONS[span.aspect] || '📌';
-        const emoji = SENTIMENT_EMOJI[span.sentiment] || '';
-        const sentVi = SENTIMENT_VI[span.sentiment] || span.sentiment;
-        const cardClass = `span-card-${span.sentiment.toLowerCase()}`;
-        const pillClass = `pill-${span.sentiment.toLowerCase()}`;
-
+    dom.emptyState.hidden = true;
+    const badges = spans.map((span) => {
+        const sentiment = normalizeSentiment(span.sentiment);
         return `
-            <div class="span-card ${cardClass}" style="animation-delay: ${i * 0.08}s">
-                <div class="span-header">
-                    <span class="span-aspect">${icon} ${span.aspect}</span>
-                    <span class="span-sentiment ${pillClass}">${emoji} ${sentVi}</span>
-                </div>
-                <div class="span-text-excerpt">"${escapeHtml(span.text)}"</div>
-            </div>
+            <span class="span-badge ${SENTIMENT_CLASSES[sentiment]}">
+                ${escapeHtml(getAspectLabel(span.aspect))}
+                <small>${escapeHtml(SENTIMENT_LABELS[sentiment])}</small>
+            </span>
         `;
-    }).join('');
+    }).join("");
+
+    dom.resultsList.innerHTML = `
+        <article class="result-card">
+            <div class="result-head">
+                <strong>Kết quả từ ${escapeHtml(result.modelUsed || "model")}</strong>
+                <span>${spans.length} đoạn</span>
+            </div>
+            <p class="highlighted-text">${buildHighlightedHTML(result.text, spans)}</p>
+            <div class="badge-row">${badges || '<span class="muted">Không phát hiện khía cạnh phù hợp</span>'}</div>
+        </article>
+    `;
 }
 
-// === UI Helpers ===
-function setLoading(loading) {
-    if (loading) {
-        btnAnalyze.classList.add('loading');
-        btnAnalyze.disabled = true;
-    } else {
-        btnAnalyze.classList.remove('loading');
-        btnAnalyze.disabled = false;
+function buildHighlightedHTML(text, spans) {
+    if (!spans.length) return escapeHtml(text);
+
+    const sorted = [...spans].sort((a, b) => a.start - b.start);
+    const clean = [];
+    let lastEnd = -1;
+    sorted.forEach((span) => {
+        if (Number.isInteger(span.start) && Number.isInteger(span.end) && span.start >= lastEnd) {
+            clean.push(span);
+            lastEnd = span.end;
+        }
+    });
+
+    let html = "";
+    let pos = 0;
+    clean.forEach((span) => {
+        const sentiment = normalizeSentiment(span.sentiment);
+        if (span.start > pos) html += escapeHtml(text.slice(pos, span.start));
+        html += `<mark class="${SENTIMENT_CLASSES[sentiment]}">${escapeHtml(text.slice(span.start, span.end))}<span>${escapeHtml(getAspectLabel(span.aspect))}</span></mark>`;
+        pos = span.end;
+    });
+    if (pos < text.length) html += escapeHtml(text.slice(pos));
+    return html;
+}
+
+function drawSentimentChart(counts) {
+    const canvas = dom.sentimentChart;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const total = SENTIMENTS.reduce((sum, key) => sum + (counts[key] || 0), 0);
+    clearCanvas(ctx, width, height);
+
+    if (!total) {
+        drawEmptyCanvas(ctx, width, height, "Chưa có dữ liệu");
+        return;
     }
+
+    const cx = 128;
+    const cy = 128;
+    const radius = 82;
+    const inner = 48;
+    let start = -Math.PI / 2;
+
+    SENTIMENTS.forEach((key) => {
+        const value = counts[key] || 0;
+        const angle = (value / total) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, start + angle);
+        ctx.closePath();
+        ctx.fillStyle = SENTIMENT_COLORS[key];
+        ctx.fill();
+        start += angle;
+    });
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, inner, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.fillStyle = "#111827";
+    ctx.font = "700 24px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(total, cx, cy + 8);
+
+    SENTIMENTS.forEach((key, index) => {
+        const y = 72 + index * 44;
+        ctx.fillStyle = SENTIMENT_COLORS[key];
+        ctx.fillRect(250, y - 12, 14, 14);
+        ctx.fillStyle = "#374151";
+        ctx.font = "600 14px system-ui";
+        ctx.textAlign = "left";
+        ctx.fillText(SENTIMENT_LABELS[key], 274, y);
+        ctx.fillStyle = "#6b7280";
+        ctx.font = "500 13px system-ui";
+        ctx.fillText(`${counts[key] || 0} (${Math.round(((counts[key] || 0) / total) * 100)}%)`, 274, y + 20);
+    });
+}
+
+function drawAspectChart(aspectCounts) {
+    const canvas = dom.aspectChart;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    clearCanvas(ctx, width, height);
+
+    const entries = Object.entries(aspectCounts)
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, 7);
+
+    if (!entries.length) {
+        drawEmptyCanvas(ctx, width, height, "Chưa có dữ liệu");
+        return;
+    }
+
+    const max = Math.max(...entries.map(([, counts]) => counts.total), 1);
+    const chartLeft = 138;
+    const barHeight = 18;
+    const gap = 14;
+    const chartWidth = width - chartLeft - 44;
+    let y = 40;
+
+    ctx.font = "600 13px system-ui";
+    entries.forEach(([aspect, counts]) => {
+        const total = counts.total;
+        const barWidth = (total / max) * chartWidth;
+        ctx.fillStyle = "#374151";
+        ctx.textAlign = "right";
+        ctx.fillText(getAspectLabel(aspect), chartLeft - 14, y + 14);
+
+        let x = chartLeft;
+        SENTIMENTS.forEach((sentiment) => {
+            const value = counts[sentiment] || 0;
+            if (!value) return;
+            const segmentWidth = (value / total) * barWidth;
+            ctx.fillStyle = SENTIMENT_COLORS[sentiment];
+            roundRect(ctx, x, y, segmentWidth, barHeight, 4);
+            ctx.fill();
+            x += segmentWidth;
+        });
+
+        ctx.fillStyle = "#6b7280";
+        ctx.textAlign = "left";
+        ctx.fillText(String(total), chartLeft + barWidth + 8, y + 14);
+        y += barHeight + gap;
+    });
+}
+
+function clearCanvas(ctx, width, height) {
+    ctx.clearRect(0, 0, width, height);
+}
+
+function drawEmptyCanvas(ctx, width, height, text) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "600 15px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(text, width / 2, height / 2);
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
+}
+
+function setLoading(isLoading) {
+    dom.btnAnalyze.classList.toggle("loading", isLoading);
+    dom.btnAnalyze.disabled = isLoading;
+    dom.modelSelect.disabled = isLoading;
+}
+
+function getDominantSentiment(counts) {
+    const total = SENTIMENTS.reduce((sum, key) => sum + (counts[key] || 0), 0);
+    if (!total) return "-";
+    const top = [...SENTIMENTS].sort((a, b) => (counts[b] || 0) - (counts[a] || 0))[0];
+    return SENTIMENT_LABELS[top];
+}
+
+function normalizeSentiment(sentiment) {
+    return SENTIMENTS.includes(sentiment) ? sentiment : "NEUTRAL";
+}
+
+function getAspectLabel(aspect) {
+    return ASPECT_LABELS[aspect] || aspect || "Khía cạnh";
 }
 
 function showToast(message) {
-    // Remove existing toast
-    const existing = document.querySelector('.toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    setTimeout(() => toast.remove(), 4000);
+    dom.toast.textContent = message;
+    dom.toast.hidden = false;
+    window.clearTimeout(showToast.timer);
+    showToast.timer = window.setTimeout(() => {
+        dom.toast.hidden = true;
+    }, 4200);
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
+function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = String(value ?? "");
     return div.innerHTML;
 }
 
-// === Init: Check API Health ===
-(async function checkHealth() {
+async function checkHealth() {
     try {
-        const res = await fetch(`${API_BASE}/api/health`);
-        if (res.ok) {
-            const data = await res.json();
-            console.log('✅ API connected:', data);
+        const response = await fetch(`${API_BASE}/api/health`);
+        if (!response.ok) throw new Error("API unavailable");
+        const data = await response.json();
+        dom.apiStatus.classList.add("online");
+        dom.apiStatusText.textContent = `API sẵn sàng (${data.device || "cpu"})`;
 
-            // Enable loaded models in selector
-            if (data.models_loaded.includes('phobert_crf')) {
-                const opt = modelSelect.querySelector('option[value="phobert_crf"]');
-                if (opt) opt.disabled = false;
-            }
+        if (Array.isArray(data.models_loaded) && data.models_loaded.includes("phobert_crf")) {
+            const option = dom.modelSelect.querySelector('option[value="phobert_crf"]');
+            if (option) option.disabled = false;
         }
     } catch {
-        console.warn('⚠️ API not reachable — make sure the backend is running');
+        dom.apiStatus.classList.add("offline");
+        dom.apiStatusText.textContent = "API chưa kết nối";
     }
-})();
+}
+
+renderDashboard();
+checkHealth();
