@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 from ..config import (
     BIGRU_CONFIG, PHOBERT_CONFIG, DATA_DIR,
     BIO_TAGS, NUM_TAGS, ASPECTS, SENTIMENTS, LABEL_NAMES,
+    DEFAULT_MODEL,
 )
 from ..models.bigru_crf import BiGRUCRF
 from ..utils.bio_utils import bio_tags_to_spans
@@ -27,7 +28,7 @@ UNK_IDX = 1
 class ABSAPredictor:
     """
     Manages model loading and inference for ABSA prediction.
-    Supports BiGRU-CRF (default) and PhoBERT-CRF.
+    Supports PhoBERT-CRF (default) and BiGRU-CRF.
     """
 
     def __init__(self):
@@ -142,7 +143,7 @@ class ABSAPredictor:
         for i, w in enumerate(keys):
             self.word2idx[w] = i + 2
 
-    def predict(self, text: str, model_name: str = "bigru_crf") -> List[dict]:
+    def predict(self, text: str, model_name: str = DEFAULT_MODEL) -> List[dict]:
         """
         Run prediction on input text.
         

@@ -10,7 +10,7 @@ MODELS_DIR = BASE_DIR / "models"
 DATA_DIR = BASE_DIR / "data"
 
 # === Model Config ===
-DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "bigru_crf")  # "bigru_crf" or "phobert_crf"
+DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "phobert_crf")  # "bigru_crf" or "phobert_crf"
 
 # BiGRU-CRF Config
 BIGRU_CONFIG = {

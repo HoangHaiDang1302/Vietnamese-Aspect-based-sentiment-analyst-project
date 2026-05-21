@@ -3,6 +3,7 @@ Pydantic schemas for API request/response validation.
 """
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from ..config import DEFAULT_MODEL
 
 
 class PredictionRequest(BaseModel):
@@ -15,7 +16,7 @@ class PredictionRequest(BaseModel):
         json_schema_extra={"examples": ["Máy đẹp, pin trâu, camera chụp rõ nét"]},
     )
     model: Optional[str] = Field(
-        default="bigru_crf",
+        default=DEFAULT_MODEL,
         description="Model to use: 'bigru_crf' or 'phobert_crf'",
     )
 

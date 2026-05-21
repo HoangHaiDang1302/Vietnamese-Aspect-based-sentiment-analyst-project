@@ -422,9 +422,15 @@ async function checkHealth() {
         dom.apiStatus.classList.add("online");
         dom.apiStatusText.textContent = `API sẵn sàng (${data.device || "cpu"})`;
 
-        if (Array.isArray(data.models_loaded) && data.models_loaded.includes("phobert_crf")) {
-            const option = dom.modelSelect.querySelector('option[value="phobert_crf"]');
-            if (option) option.disabled = false;
+        if (Array.isArray(data.models_loaded)) {
+            const phobertOption = dom.modelSelect.querySelector('option[value="phobert_crf"]');
+            const bigruOption = dom.modelSelect.querySelector('option[value="bigru_crf"]');
+            const hasPhoBert = data.models_loaded.includes("phobert_crf");
+            const hasBiGru = data.models_loaded.includes("bigru_crf");
+
+            if (phobertOption) phobertOption.disabled = !hasPhoBert;
+            if (bigruOption) bigruOption.disabled = !hasBiGru;
+            dom.modelSelect.value = hasPhoBert ? "phobert_crf" : "bigru_crf";
         }
     } catch {
         dom.apiStatus.classList.add("offline");

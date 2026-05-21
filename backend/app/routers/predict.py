@@ -10,6 +10,7 @@ from ..schemas.prediction import (
     HealthResponse,
     ModelInfoResponse,
 )
+from ..config import DEFAULT_MODEL
 from ..services.predictor import predictor
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ async def predict(request: PredictionRequest):
     
     Returns detected aspect-sentiment spans with text highlights.
     """
-    model_name = request.model or "bigru_crf"
+    model_name = request.model or DEFAULT_MODEL
 
     if model_name not in predictor.models:
         available = predictor.available_models
